@@ -44,6 +44,8 @@ jobs:
           msbuild "Fuz Ro D'oh 64.vcxproj" /m `
             /p:Configuration=Release `
             /p:Platform=x64 `
+            /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=10.0.26100.0 `
             /p:Skyrim64Path="$skyrim" `
             /p:SMESundriesIncludePath="$sme"
 
