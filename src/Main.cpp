@@ -44,6 +44,7 @@ extern "C" DLLEXPORT constinit auto SKSEPlugin_Version = []() {
     v.PluginName("Fuz Ro D'oh");
     v.AuthorName("shadeMe; Skyrim 1.7.104 CommonLib port");
     v.UsesAddressLibrary();
+    v.UsesUpdatedStructs();
     v.CompatibleVersions({ REL::Version{ 1, 7, 104, 0 } });
     return v;
 }();
