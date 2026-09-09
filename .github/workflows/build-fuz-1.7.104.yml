@@ -29,8 +29,9 @@ jobs:
           git -C ..\skse64 checkout 25b72352adb6543fa6d0bd3795780672b2e238e0
 
           git clone https://github.com/ianpatt/common.git ..\common
-          Copy-Item ..\common\common\common_vc14.vcxproj ..\common\common_vc14.vcxproj -Force
-          Copy-Item ..\common\common\common_vc14.vcxproj.filters ..\common\common_vc14.vcxproj.filters -Force
+          # Fuz's old project expects ianpatt/common to be flat at ../common,
+          # while current SKSE still references ../common/common. Keep both layouts.
+          Copy-Item ..\common\common\* ..\common\ -Recurse -Force
 
           git clone https://github.com/shadeMe/SME-Sundries.git ..\SME-Sundries
 
