@@ -1,211 +1,94 @@
 cmake_minimum_required(VERSION 3.20)
+
 set(NAME "FuzRoDoh")
-set(VERSION 1.0.0)
+set(VERSION 2.5.0)
 
-# ---- Cache build vars ----
+project(${NAME} VERSION ${VERSION} LANGUAGES CXX)
 
-macro(set_from_environment VARIABLE)
-	if (NOT DEFINED ${VARIABLE} AND DEFINED ENV{${VARIABLE}})
-		set(${VARIABLE} $ENV{${VARIABLE}})
-	endif ()
-endmacro()
-
-set_from_environment(VCPKG_ROOT)
-set(CommonLibName "CommonLibSSE")
-set_from_environment(Skyrim64Path)
-set(SkyrimPath ${Skyrim64Path})
-set(SkyrimVersion "Skyrim SSE")
-
-message(
-	STATUS
-	"Building ${NAME} ${VERSION}."
-)
-
-if (DEFINED VCPKG_ROOT)
-	set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
-	set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "")
-else ()
-	message(
-		WARNING
-		"Variable VCPKG_ROOT is not set. Continuing without vcpkg."
-	)
-endif ()
-
-set(Boost_USE_STATIC_RUNTIME OFF CACHE BOOL "")
-
-# ---- Project ----
-
-project(
-	${NAME}
-	VERSION ${VERSION}
-	LANGUAGES CXX
-)
-
-configure_file(
-	${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.h.in
-	${CMAKE_CURRENT_BINARY_DIR}/include/Version.h
-	@ONLY
-)
-
-configure_file(
-	${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.rc.in
-	${CMAKE_CURRENT_BINARY_DIR}/version.rc
-	@ONLY
-)
-
-# ---- Include guards ----
+message(STATUS "Building ${NAME} ${VERSION} for the Skyrim 1.7.104 test port")
 
 if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
-	message(
-		FATAL_ERROR
-			"In-source builds not allowed. Please make a new directory (called a build directory) and run CMake from there."
-	)
+    message(FATAL_ERROR "In-source builds are not allowed")
 endif()
 
-# ---- Globals ----
+# CommonLibSSE-NG 7.4.0 is the first-party dependency baseline used by this port.
+# Fetch it at an exact commit instead of the obsolete colorglass vcpkg registry that
+# supplied CommonLib 3.5.5 to the legacy CLIB fork.
+include(FetchContent)
+set(SKSE_SUPPORT_XBYAK ON CACHE BOOL "" FORCE)
+set(SKSE_SUPPORT_PATCH_SAFETY OFF CACHE BOOL "" FORCE)
+set(ENABLE_SKYRIM_SE ON CACHE BOOL "" FORCE)
+set(ENABLE_SKYRIM_AE ON CACHE BOOL "" FORCE)
+set(ENABLE_SKYRIM_VR ON CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(COMMONLIB_ENABLE_IPO OFF CACHE BOOL "" FORCE)
 
-add_compile_definitions(
-	SKSE_SUPPORT_XBYAK
+FetchContent_Declare(
+    CommonLibSSE_NG
+    GIT_REPOSITORY https://github.com/alandtse/CommonLibSSE-NG.git
+    GIT_TAG 9b17b42fc9db23aea2b60f92690e778784e612b1
+    GIT_SHALLOW FALSE
+)
+FetchContent_MakeAvailable(CommonLibSSE_NG)
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/include/Version.h
+    @ONLY
 )
 
-if (MSVC)
-	if (NOT ${CMAKE_GENERATOR} STREQUAL "Ninja")
-		add_compile_options(
-			/MP	# Build with Multiple Processes
-		)
-	endif ()
-endif ()
-
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
-
-set(Boost_USE_STATIC_LIBS ON)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "")
-
-# ---- Dependencies ----
-
-find_package(CommonLibSSE CONFIG REQUIRED)
-
-find_package(robin_hood CONFIG REQUIRED)
-find_path(SIMPLEINI_INCLUDE_DIRS "ConvertUTF.c")
-
-# ---- Add source files ----
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.rc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/version.rc
+    @ONLY
+)
 
 include(cmake/headerlist.cmake)
 include(cmake/sourcelist.cmake)
 
-source_group(
-	TREE
-		${CMAKE_CURRENT_SOURCE_DIR}
-	FILES
-		${headers}
-		${sources}
-)
-
-source_group(
-	TREE
-		${CMAKE_CURRENT_BINARY_DIR}
-	FILES
-		${CMAKE_CURRENT_BINARY_DIR}/include/Version.h
-)
-
-# ---- Create DLL ----
-
 add_library(
-	${PROJECT_NAME}
-	SHARED
-	${headers}
-	${sources}
-	${CMAKE_CURRENT_BINARY_DIR}/include/Version.h
-	${CMAKE_CURRENT_BINARY_DIR}/version.rc
-	.clang-format
+    ${PROJECT_NAME}
+    SHARED
+    ${headers}
+    ${sources}
+    ${CMAKE_CURRENT_BINARY_DIR}/include/Version.h
+    ${CMAKE_CURRENT_BINARY_DIR}/version.rc
 )
 
-target_compile_features(
-	${PROJECT_NAME}
-	PRIVATE
-		cxx_std_20
-)
-
-target_compile_definitions(
-	${PROJECT_NAME}
-	PRIVATE
-		_UNICODE
-)
+target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
+target_compile_definitions(${PROJECT_NAME} PRIVATE _UNICODE)
 
 target_include_directories(
-	${PROJECT_NAME}
-	PRIVATE
-		${CMAKE_CURRENT_BINARY_DIR}/include
-		${CMAKE_CURRENT_SOURCE_DIR}/src
-		${SIMPLEINI_INCLUDE_DIRS}
+    ${PROJECT_NAME}
+    PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_link_libraries(
-	${PROJECT_NAME}
-	PRIVATE
-		${CommonLibName}::${CommonLibName}
-		robin_hood::robin_hood
+    ${PROJECT_NAME}
+    PRIVATE
+        CommonLibSSE::CommonLibSSE
 )
 
-target_precompile_headers(
-	${PROJECT_NAME}
-	PRIVATE
-		src/PCH.h
+target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
 
-if (MSVC)
-	target_compile_options(
-		${PROJECT_NAME}
-		PRIVATE
-			/sdl	# Enable Additional Security Checks
-			/utf-8	# Set Source and Executable character sets to UTF-8
-			/Zi	# Debug Information Format
-
-			/permissive-	# Standards conformance
-
-			/Zc:alignedNew	# C++17 over-aligned allocation
-			/Zc:auto	# Deduce Variable Type
-			/Zc:char8_t
-			/Zc:__cplusplus	# Enable updated __cplusplus macro
-			/Zc:externC
-			/Zc:externConstexpr	# Enable extern constexpr variables
-			/Zc:forScope	# Force Conformance in for Loop Scope
-			/Zc:hiddenFriend
-			/Zc:implicitNoexcept	# Implicit Exception Specifiers
-			/Zc:lambda
-			/Zc:noexceptTypes	# C++17 noexcept rules
-			/Zc:preprocessor	# Enable preprocessor conformance mode
-			/Zc:referenceBinding	# Enforce reference binding rules
-			/Zc:rvalueCast	# Enforce type conversion rules
-			/Zc:sizedDealloc	# Enable Global Sized Deallocation Functions
-			/Zc:strictStrings	# Disable string literal type conversion
-			/Zc:ternary	# Enforce conditional operator rules
-			/Zc:threadSafeInit	# Thread-safe Local Static Initialization
-			/Zc:tlsGuards
-			/Zc:trigraphs	# Trigraphs Substitution
-			/Zc:wchar_t	# wchar_t Is Native Type
-
-			/external:anglebrackets
-			/external:W0
-
-			/W4	# Warning level
-			/WX # Warning level (warnings are errors)
-
-			"$<$<CONFIG:DEBUG>:>"
-			"$<$<CONFIG:RELEASE>:/Zc:inline;/JMC-;/Ob3>"
-	)
-
-	target_link_options(
-		${PROJECT_NAME}
-		PRIVATE
-			/WX	# Treat Linker Warnings as Errors
-
-			"$<$<CONFIG:DEBUG>:/INCREMENTAL;/OPT:NOREF;/OPT:NOICF>"
-			"$<$<CONFIG:RELEASE>:/INCREMENTAL:NO;/OPT:REF;/OPT:ICF;/DEBUG:FULL>"
-	)
-
-	# fix a warning with /Ob2 being overridden with /Ob3
-	string(REPLACE "/Ob2" "/Ob3" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
-
-endif ()
+if(MSVC)
+    target_compile_options(
+        ${PROJECT_NAME}
+        PRIVATE
+            /sdl
+            /utf-8
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /W4
+            /wd4100
+            /wd4189
+            /wd4505
+    )
+endif()
