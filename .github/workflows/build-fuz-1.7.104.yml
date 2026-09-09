@@ -7,7 +7,7 @@ on:
     paths:
       - '.github/workflows/build-fuz-1.7.104.yml'
 
-# Re-trigger after aligning the plugin/vcpkg CRT with CommonLibSSE-NG 7.4.
+# Re-trigger after adding the Skyrim 1.7.104 CachedResponseData signature discriminator.
 jobs:
   build:
     runs-on: windows-2022
@@ -20,6 +20,10 @@ jobs:
         with:
           ref: skyrim-1.7.104-clib-port
           fetch-depth: 0
+
+      - name: Apply Skyrim 1.7.104 CachedResponseData patch
+        shell: pwsh
+        run: python ci/patch_cached_response_signature.py
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -68,6 +72,7 @@ jobs:
           Source commit: $(git rev-parse HEAD)
 
           This build validates the known upstream function signatures before writing hooks.
+          CachedResponseData duplicate signatures are accepted only when +0xEC is uniquely a 5-byte CALL site.
           If validation fails, the plugin refuses to load and writes Fuz Ro D'oh.log.
           "@ | Set-Content package\BUILD_INFO.txt
 
