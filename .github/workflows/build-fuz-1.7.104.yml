@@ -32,6 +32,12 @@ jobs:
           # Fuz's old project expects ianpatt/common to be flat at ../common,
           # while current SKSE still references ../common/common. Keep both layouts.
           Copy-Item ..\common\common\* ..\common\ -Recurse -Force
+          # The flattened common project must force-include its own root IPrefix.h;
+          # otherwise it includes both root and nested headers and causes redefinitions.
+          $commonProj = '..\common\common_vc14.vcxproj'
+          $commonXml = Get-Content $commonProj -Raw
+          $commonXml = $commonXml.Replace('common/IPrefix.h', 'IPrefix.h')
+          Set-Content -Path $commonProj -Value $commonXml -Encoding utf8
 
           git clone https://github.com/shadeMe/SME-Sundries.git ..\SME-Sundries
 
