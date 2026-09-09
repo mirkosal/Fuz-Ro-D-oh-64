@@ -7,8 +7,9 @@ on:
     paths:
       - '.github/workflows/build-fuz-1.7.104.yml'
 
-# Diagnostic build: resolve the upstream 1.6.1170 functions through their
-# stable Address Library IDs on 1.7.104, then log the changed in-function sites.
+# Functional test build for Skyrim 1.7.104.  The four enclosing functions are
+# resolved through Address Library v13 IDs and all five in-function hook sites
+# are structurally validated before any branch is written.
 jobs:
   build:
     runs-on: windows-2022
@@ -22,20 +23,9 @@ jobs:
           ref: skyrim-1.7.104-clib-port
           fetch-depth: 0
 
-      - name: Apply Skyrim 1.7.104 CachedResponseData signature diagnostics
+      - name: Apply validated Skyrim 1.7.104 functional hooks
         shell: pwsh
-        run: python ci/patch_cached_response_signature.py
-
-      - name: Apply Address Library ID hook-site diagnostic
-        shell: pwsh
-        run: python ci/patch_fuz_runtime_ids_diag.py
-
-      - name: Fix CommonLib logger API in diagnostic patch
-        shell: pwsh
-        run: |
-          $src = Get-Content src/Hooks.cpp -Raw
-          $src = $src.Replace('logger::warning(', 'logger::warn(')
-          Set-Content src/Hooks.cpp $src
+        run: python ci/patch_fuz_runtime_v5.py
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -61,7 +51,7 @@ jobs:
         shell: pwsh
         run: cmake --build build --config Release --parallel
 
-      - name: Package full Vortex diagnostic mod
+      - name: Package full Vortex test mod
         if: success()
         shell: pwsh
         run: |
@@ -72,33 +62,33 @@ jobs:
           New-Item -ItemType Directory -Force -Path "package\Sound\Voice\Fuz Ro Doh" | Out-Null
           Copy-Item $dll.FullName "package\SKSE\Plugins\Fuz Ro D'oh.dll"
 
-          Get-ChildItem -Path '[Depends]' -Filter 'Stock_*.fuz' | ForEach-Object {
+          Get-ChildItem -LiteralPath '[Depends]' -Filter 'Stock_*.fuz' | ForEach-Object {
             Copy-Item $_.FullName "package\Sound\Voice\Fuz Ro Doh\$($_.Name)"
           }
 
           @"
-          Fuz Ro D'oh DIAGNOSTIC PORT for Skyrim runtime 1.7.104.0
+          Fuz Ro D'oh FUNCTIONAL TEST PORT for Skyrim runtime 1.7.104.0
           SKSE 2.3.1
           CommonLibSSE-NG 7.4.0
           Branch: skyrim-1.7.104-clib-port
           Source commit: $(git rev-parse HEAD)
 
-          Upstream 1.6.1170 function RVAs were reverse-mapped to Address Library IDs:
+          Address Library v13 IDs:
             CachedResponseData ctor: 35249
             UIUtils::QueueDialogSubtitles: 52854
             ASCM::DisplayQueuedNPCChatterData: 52637
             ASCM::QueueNPCChatterData: 52626
 
-          This diagnostic build intentionally refuses to install hooks after logging
-          the Address-Library-resolved 1.7.104 function bases and candidate hook sites.
-          It is only for producing a new Fuz Ro D'oh.log; do not continue gameplay with it.
+          Hook sites validated from the user's Skyrim 1.7.104 diagnostic log.
+          QueueNPCChatterData's non-display exit moved from upstream +0xCA to +0x186.
+          This is still a test build: verify startup and unvoiced dialogue before normal play.
           "@ | Set-Content package\BUILD_INFO.txt
 
-          Compress-Archive -Path package\* -DestinationPath "Fuz-Ro-D-oh-Skyrim-1.7.104-Diagnostic-v4.zip" -Force
+          Compress-Archive -Path package\* -DestinationPath "Fuz-Ro-D-oh-Skyrim-1.7.104-Functional-Test-v5.zip" -Force
 
-      - name: Upload Vortex diagnostic ZIP
+      - name: Upload Vortex test ZIP
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Fuz-Ro-D-oh-Skyrim-1.7.104-Diagnostic-v4
-          path: Fuz-Ro-D-oh-Skyrim-1.7.104-Diagnostic-v4.zip
+          name: Fuz-Ro-D-oh-Skyrim-1.7.104-Functional-Test-v5
+          path: Fuz-Ro-D-oh-Skyrim-1.7.104-Functional-Test-v5.zip
