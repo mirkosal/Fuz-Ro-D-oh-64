@@ -1,6 +1,7 @@
 #pragma once
 
 #define NOMMNOSOUND
+#define NOMINMAX
 
 #include "RE/Skyrim.h"
 #include "SKSE/SKSE.h"
