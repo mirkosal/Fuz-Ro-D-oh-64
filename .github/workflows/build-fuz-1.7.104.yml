@@ -11,7 +11,7 @@ jobs:
   build:
     runs-on: windows-2022
     env:
-      VCPKG_ROOT: C:\vcpkg-fuz
+      FUZ_VCPKG_ROOT: C:\vcpkg-fuz
     steps:
       - name: Checkout 1.7.104 port branch
         uses: actions/checkout@v4
@@ -25,15 +25,16 @@ jobs:
       - name: Setup vcpkg
         shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
-          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if (Test-Path $env:FUZ_VCPKG_ROOT) { Remove-Item -Recurse -Force $env:FUZ_VCPKG_ROOT }
+          git clone https://github.com/microsoft/vcpkg.git $env:FUZ_VCPKG_ROOT
+          & "$env:FUZ_VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
 
       - name: Configure
         shell: pwsh
         run: |
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:FUZ_VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows-static
 
       - name: Build
