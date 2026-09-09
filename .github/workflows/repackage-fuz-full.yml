@@ -1,0 +1,73 @@
+name: Repackage full Fuz Ro D'oh 1.7.104 test mod
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+    paths:
+      - '.github/workflows/repackage-fuz-full.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-2022
+    env:
+      SOURCE_ARTIFACT_ID: '10116707044'
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout port branch for stock FUZ assets
+        uses: actions/checkout@v4
+        with:
+          ref: skyrim-1.7.104-clib-port
+          fetch-depth: 1
+
+      - name: Download successful compiled artifact
+        shell: pwsh
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $uri = "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$env:SOURCE_ARTIFACT_ID/zip"
+          Invoke-WebRequest -Headers $headers -Uri $uri -OutFile artifact.zip
+          Expand-Archive artifact.zip -DestinationPath artifact -Force
+          $inner = Get-ChildItem artifact -Filter '*.zip' | Select-Object -First 1
+          if (-not $inner) { throw 'Inner Vortex ZIP not found in build artifact' }
+          Expand-Archive $inner.FullName -DestinationPath compiled -Force
+
+      - name: Build standalone Vortex package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "package\SKSE\Plugins" | Out-Null
+          New-Item -ItemType Directory -Force -Path "package\Sound\Voice\Fuz Ro Doh" | Out-Null
+
+          Copy-Item -LiteralPath "compiled\SKSE\Plugins\Fuz Ro D'oh.dll" -Destination "package\SKSE\Plugins\Fuz Ro D'oh.dll"
+
+          $stock = Get-ChildItem -LiteralPath '[Depends]' -Filter 'Stock_*.fuz'
+          if ($stock.Count -ne 10) { throw "Expected 10 Stock_*.fuz files, found $($stock.Count)" }
+          foreach ($file in $stock) {
+            Copy-Item -LiteralPath $file.FullName -Destination "package\Sound\Voice\Fuz Ro Doh\$($file.Name)"
+          }
+
+          @"
+          Fuz Ro D'oh TEST PORT for Skyrim runtime 1.7.104.0
+          SKSE 2.3.1
+          CommonLibSSE-NG 7.4.0
+          Port branch: skyrim-1.7.104-clib-port
+          Compiled DLL source artifact: $env:SOURCE_ARTIFACT_ID
+
+          Standalone Vortex package: compiled DLL plus all 10 upstream Stock_*.fuz silent voice assets.
+          "@ | Set-Content package\BUILD_INFO.txt
+
+          Compress-Archive -Path package\* -DestinationPath "Fuz-Ro-D-oh-Skyrim-1.7.104-Full-Test.zip" -Force
+
+      - name: Upload standalone Vortex ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fuz-Ro-D-oh-Skyrim-1.7.104-Full-Test-Standalone
+          path: Fuz-Ro-D-oh-Skyrim-1.7.104-Full-Test.zip
