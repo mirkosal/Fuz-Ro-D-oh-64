@@ -11,9 +11,7 @@ if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
     message(FATAL_ERROR "In-source builds are not allowed")
 endif()
 
-# CommonLibSSE-NG 7.4.0 is the first-party dependency baseline used by this port.
-# Fetch it at an exact commit instead of the obsolete colorglass vcpkg registry that
-# supplied CommonLib 3.5.5 to the legacy CLIB fork.
+# CommonLibSSE-NG 7.4.0 is the dependency baseline used by this port.
 include(FetchContent)
 set(SKSE_SUPPORT_XBYAK ON CACHE BOOL "" FORCE)
 set(SKSE_SUPPORT_PATCH_SAFETY OFF CACHE BOOL "" FORCE)
@@ -73,8 +71,10 @@ target_link_libraries(
 
 target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)
 
+# CommonLibSSE-NG 7.4 is built with the dynamic MSVC runtime (/MD).
+# Keep this target on the same CRT to avoid LNK2038/LNK1169 runtime-library conflicts.
 set_target_properties(${PROJECT_NAME} PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
 
 if(MSVC)
