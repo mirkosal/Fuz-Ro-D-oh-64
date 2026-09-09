@@ -30,6 +30,13 @@ jobs:
         shell: pwsh
         run: python ci/patch_fuz_runtime_ids_diag.py
 
+      - name: Fix CommonLib logger API in diagnostic patch
+        shell: pwsh
+        run: |
+          $src = Get-Content src/Hooks.cpp -Raw
+          $src = $src.Replace('logger::warning(', 'logger::warn(')
+          Set-Content src/Hooks.cpp $src
+
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
