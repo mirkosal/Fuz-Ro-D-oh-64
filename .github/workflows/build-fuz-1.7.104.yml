@@ -10,11 +10,14 @@ on:
 jobs:
   build:
     runs-on: windows-2022
+    env:
+      FUZ_VCPKG_ROOT: C:\vcpkg-fuz
+
     steps:
-      - name: Checkout native 1.7.104 port branch
+      - name: Checkout CommonLib 1.7.104 port
         uses: actions/checkout@v4
         with:
-          ref: skyrim-1.7.104-native-port
+          ref: skyrim-1.7.104-clib-port
           fetch-depth: 0
 
       - name: Setup MSVC
@@ -22,58 +25,56 @@ jobs:
         with:
           arch: x64
 
-      - name: Fetch current SKSE and legacy dependencies
+      - name: Setup current vcpkg
         shell: pwsh
         run: |
-          git clone https://github.com/ianpatt/skse64.git ..\skse64
-          git -C ..\skse64 checkout 25b72352adb6543fa6d0bd3795780672b2e238e0
+          if (Test-Path $env:FUZ_VCPKG_ROOT) { Remove-Item -Recurse -Force $env:FUZ_VCPKG_ROOT }
+          git clone https://github.com/microsoft/vcpkg.git $env:FUZ_VCPKG_ROOT
+          & "$env:FUZ_VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
 
-          git clone https://github.com/ianpatt/common.git ..\common
-          # Fuz's old project expects ianpatt/common to be flat at ../common,
-          # while current SKSE still references ../common/common. Keep both layouts.
-          Copy-Item ..\common\common\* ..\common\ -Recurse -Force
-          # The flattened common project must force-include its own root IPrefix.h;
-          # otherwise it includes both root and nested headers and causes redefinitions.
-          $commonProj = '..\common\common_vc14.vcxproj'
-          $commonXml = Get-Content $commonProj -Raw
-          $commonXml = $commonXml.Replace('common/IPrefix.h', 'IPrefix.h')
-          Set-Content -Path $commonProj -Value $commonXml -Encoding utf8
-
-          git clone https://github.com/shadeMe/SME-Sundries.git ..\SME-Sundries
-
-          New-Item -ItemType Directory -Force -Path .ci-skyrim\Data\SKSE\Plugins | Out-Null
-
-      - name: Build legacy source against SKSE 2.3.1
+      - name: Configure CommonLibSSE-NG 7.4 port
         shell: pwsh
         run: |
-          $skyrim = (Resolve-Path .ci-skyrim).Path
-          $sme = (Resolve-Path ..\SME-Sundries).Path
-          msbuild "Fuz Ro D'oh 64.vcxproj" /m `
-            /p:Configuration=Release `
-            /p:Platform=x64 `
-            /p:PlatformToolset=v143 `
-            /p:WindowsTargetPlatformVersion=10.0.26100.0 `
-            /p:Skyrim64Path="$skyrim" `
-            /p:SMESundriesIncludePath="$sme"
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:FUZ_VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static
 
-      - name: Collect compile candidate
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Package full Vortex test mod
         if: success()
         shell: pwsh
         run: |
-          $dll = Get-ChildItem -Recurse -Filter "Fuz Ro D'oh.dll" | Where-Object { $_.FullName -notlike '*package*' } | Select-Object -First 1
-          if (-not $dll) { throw "Fuz Ro D'oh.dll not found" }
-          New-Item -ItemType Directory -Force -Path compile-output | Out-Null
-          Copy-Item $dll.FullName compile-output\Fuz-Ro-D-oh-compile-baseline.dll
-          @"
-          COMPILE BASELINE ONLY - DO NOT INSTALL IN SKYRIM YET
-          Source branch: skyrim-1.7.104-native-port
-          SKSE source: 25b72352adb6543fa6d0bd3795780672b2e238e0 (current 2.3.1-era source)
-          The runtime hook addresses are still being validated for Skyrim 1.7.104.0.
-          "@ | Set-Content compile-output\README.txt
+          $dll = Get-ChildItem -Path build -Recurse -Filter 'FuzRoDoh.dll' | Select-Object -First 1
+          if (-not $dll) { throw 'FuzRoDoh.dll not found' }
 
-      - name: Upload compile baseline
+          New-Item -ItemType Directory -Force -Path "package\SKSE\Plugins" | Out-Null
+          New-Item -ItemType Directory -Force -Path "package\Sound\Voice\Fuz Ro Doh" | Out-Null
+          Copy-Item $dll.FullName "package\SKSE\Plugins\Fuz Ro D'oh.dll"
+
+          Get-ChildItem -Path '[Depends]' -Filter 'Stock_*.fuz' | ForEach-Object {
+            Copy-Item $_.FullName "package\Sound\Voice\Fuz Ro Doh\$($_.Name)"
+          }
+
+          @"
+          Fuz Ro D'oh TEST PORT for Skyrim runtime 1.7.104.0
+          SKSE 2.3.1
+          CommonLibSSE-NG 7.4.0
+          Branch: skyrim-1.7.104-clib-port
+          Source commit: $(git rev-parse HEAD)
+
+          This build validates the known upstream function signatures before writing hooks.
+          If validation fails, the plugin refuses to load and writes Fuz Ro D'oh.log.
+          "@ | Set-Content package\BUILD_INFO.txt
+
+          Compress-Archive -Path package\* -DestinationPath "Fuz-Ro-D-oh-Skyrim-1.7.104-Full-Test.zip" -Force
+
+      - name: Upload Vortex ZIP
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Fuz-Ro-D-oh-1.7.104-Compile-Baseline
-          path: compile-output
+          name: Fuz-Ro-D-oh-Skyrim-1.7.104-Full-Test
+          path: Fuz-Ro-D-oh-Skyrim-1.7.104-Full-Test.zip
