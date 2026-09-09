@@ -1,0 +1,99 @@
+name: Probe Fuz Ro D'oh 1.6.1170 Address Library IDs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+    paths:
+      - '.github/workflows/probe-fuz-1170-ids.yml'
+
+jobs:
+  probe:
+    runs-on: windows-2022
+    steps:
+      - name: Download Skyrim 1.6.1170 Address Library mirror
+        shell: pwsh
+        run: |
+          $url = 'https://git.eddoursul.win/enderal/enderalse/media/commit/f0fef8fc270dc567bf42f4ac618fdb26df4103df/SKSE/Plugins/versionlib-1-6-1170-0.bin'
+          curl.exe -L --fail --retry 3 $url -o versionlib-1-6-1170-0.bin
+          if (-not (Test-Path versionlib-1-6-1170-0.bin)) { throw 'download failed' }
+          Get-Item versionlib-1-6-1170-0.bin | Format-List Name,Length
+
+      - name: Reverse-map upstream Fuz RVAs to Address Library IDs
+        shell: python
+        run: |
+          import struct
+          from pathlib import Path
+
+          data = Path('versionlib-1-6-1170-0.bin').read_bytes()
+          p = 0
+          def i32():
+              global p
+              v = struct.unpack_from('<i', data, p)[0]; p += 4; return v
+          def u8():
+              global p
+              v = data[p]; p += 1; return v
+          def u16():
+              global p
+              v = struct.unpack_from('<H', data, p)[0]; p += 2; return v
+          def u32():
+              global p
+              v = struct.unpack_from('<I', data, p)[0]; p += 4; return v
+          def u64():
+              global p
+              v = struct.unpack_from('<Q', data, p)[0]; p += 8; return v
+
+          fmt = i32()
+          ver = tuple(i32() for _ in range(4))
+          nlen = i32(); name = data[p:p+nlen]; p += nlen
+          ptr = i32(); count = i32()
+          print('format', fmt, 'version', ver, 'name', name, 'ptr', ptr, 'count', count)
+          if fmt != 2:
+              raise SystemExit(f'unexpected format {fmt}')
+
+          by_off = {}
+          prev_id = 0
+          prev_off = 0
+          for _ in range(count):
+              t = u8(); lo = t & 0xF; hi = t >> 4
+              if lo == 0: ident = u64()
+              elif lo == 1: ident = prev_id + 1
+              elif lo == 2: ident = prev_id + u8()
+              elif lo == 3: ident = prev_id - u8()
+              elif lo == 4: ident = prev_id + u16()
+              elif lo == 5: ident = prev_id - u16()
+              elif lo == 6: ident = u16()
+              elif lo == 7: ident = u32()
+              else: raise RuntimeError(f'bad id encoding {lo}')
+
+              tmp = prev_off // ptr if (hi & 8) else prev_off
+              b = hi & 7
+              if b == 0: off = u64()
+              elif b == 1: off = tmp + 1
+              elif b == 2: off = tmp + u8()
+              elif b == 3: off = tmp - u8()
+              elif b == 4: off = tmp + u16()
+              elif b == 5: off = tmp - u16()
+              elif b == 6: off = u16()
+              elif b == 7: off = u32()
+              else: raise RuntimeError(f'bad offset encoding {b}')
+              if hi & 8: off *= ptr
+              by_off.setdefault(off, []).append(ident)
+              prev_id, prev_off = ident, off
+
+          targets = {
+              'CachedResponseData_Ctor': 0x5DE460,
+              'UIUtils_QueueDialogSubtitles': 0x976E60,
+              'ASCM_DisplayQueuedNPCChatterData': 0x96D1B0,
+              'ASCM_QueueNPCChatterData': 0x96CB00,
+          }
+          for name, off in targets.items():
+              ids = by_off.get(off, [])
+              print(f'FUZ_ID {name} RVA=0x{off:X} IDs={ids}')
+              if not ids:
+                  # Report closest mappings for diagnosis.
+                  keys = sorted(by_off)
+                  import bisect
+                  j = bisect.bisect_left(keys, off)
+                  for k in keys[max(0,j-3):min(len(keys),j+4)]:
+                      print(f'  near RVA=0x{k:X} delta={k-off:+#x} IDs={by_off[k]}')
