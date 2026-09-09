@@ -7,7 +7,7 @@ on:
     paths:
       - '.github/workflows/build-fuz-1.7.104.yml'
 
-# Re-trigger after completing the CommonLibSSE-NG 7.4 source port.
+# Re-trigger after aligning the plugin/vcpkg CRT with CommonLibSSE-NG 7.4.
 jobs:
   build:
     runs-on: windows-2022
@@ -39,7 +39,7 @@ jobs:
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TOOLCHAIN_FILE="$env:FUZ_VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows-static
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
 
       - name: Build Release
         shell: pwsh
