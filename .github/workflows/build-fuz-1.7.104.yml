@@ -10,57 +10,61 @@ on:
 jobs:
   build:
     runs-on: windows-2022
-    env:
-      FUZ_VCPKG_ROOT: C:\vcpkg-fuz
     steps:
-      - name: Checkout 1.7.104 port branch
+      - name: Checkout native 1.7.104 port branch
         uses: actions/checkout@v4
         with:
-          ref: skyrim-1.7.104-clib-port
+          ref: skyrim-1.7.104-native-port
           fetch-depth: 0
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
-      - name: Setup vcpkg
+      - name: Fetch current SKSE and legacy dependencies
         shell: pwsh
         run: |
-          if (Test-Path $env:FUZ_VCPKG_ROOT) { Remove-Item -Recurse -Force $env:FUZ_VCPKG_ROOT }
-          git clone https://github.com/microsoft/vcpkg.git $env:FUZ_VCPKG_ROOT
-          & "$env:FUZ_VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          git clone https://github.com/ianpatt/skse64.git ..\skse64
+          git -C ..\skse64 checkout 25b72352adb6543fa6d0bd3795780672b2e238e0
 
-      - name: Configure
+          git clone https://github.com/ianpatt/common.git ..\common
+          Copy-Item ..\common\common\common_vc14.vcxproj ..\common\common_vc14.vcxproj -Force
+          Copy-Item ..\common\common\common_vc14.vcxproj.filters ..\common\common_vc14.vcxproj.filters -Force
+
+          git clone https://github.com/shadeMe/SME-Sundries.git ..\SME-Sundries
+
+          New-Item -ItemType Directory -Force -Path .ci-skyrim\Data\SKSE\Plugins | Out-Null
+
+      - name: Build legacy source against SKSE 2.3.1
         shell: pwsh
         run: |
-          cmake -S . -B build -G Ninja `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="$env:FUZ_VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows-static
+          $skyrim = (Resolve-Path .ci-skyrim).Path
+          $sme = (Resolve-Path ..\SME-Sundries).Path
+          msbuild "Fuz Ro D'oh 64.vcxproj" /m `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:Skyrim64Path="$skyrim" `
+            /p:SMESundriesIncludePath="$sme"
 
-      - name: Build
-        shell: pwsh
-        run: cmake --build build --config Release --parallel
-
-      - name: Package Vortex ZIP
+      - name: Collect compile candidate
         if: success()
         shell: pwsh
         run: |
-          $dll = Get-ChildItem -Path build -Recurse -Filter 'FuzRoDoh.dll' | Select-Object -First 1
-          if (-not $dll) { $dll = Get-ChildItem -Path build -Recurse -Filter "Fuz Ro D'oh.dll" | Select-Object -First 1 }
-          if (-not $dll) { throw 'Fuz Ro D oh DLL not found' }
-          New-Item -ItemType Directory -Force -Path package\SKSE\Plugins | Out-Null
-          Copy-Item $dll.FullName "package\SKSE\Plugins\Fuz Ro D'oh.dll"
+          $dll = Get-ChildItem -Recurse -Filter "Fuz Ro D'oh.dll" | Where-Object { $_.FullName -notlike '*package*' } | Select-Object -First 1
+          if (-not $dll) { throw "Fuz Ro D'oh.dll not found" }
+          New-Item -ItemType Directory -Force -Path compile-output | Out-Null
+          Copy-Item $dll.FullName compile-output\Fuz-Ro-D-oh-compile-baseline.dll
           @"
-          Fuz Ro D'oh test build for Skyrim runtime 1.7.104.0
-          SKSE 2.3.1
-          Branch: skyrim-1.7.104-clib-port
-          Commit: $env:GITHUB_SHA
-          "@ | Set-Content package\BUILD_INFO.txt
-          Compress-Archive -Path package\* -DestinationPath "Fuz-Ro-D-oh-Skyrim-1.7.104-Test.zip" -Force
+          COMPILE BASELINE ONLY - DO NOT INSTALL IN SKYRIM YET
+          Source branch: skyrim-1.7.104-native-port
+          SKSE source: 25b72352adb6543fa6d0bd3795780672b2e238e0 (current 2.3.1-era source)
+          The runtime hook addresses are still being validated for Skyrim 1.7.104.0.
+          "@ | Set-Content compile-output\README.txt
 
-      - name: Upload artifact
+      - name: Upload compile baseline
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Fuz-Ro-D-oh-Skyrim-1.7.104-Test
-          path: Fuz-Ro-D-oh-Skyrim-1.7.104-Test.zip
+          name: Fuz-Ro-D-oh-1.7.104-Compile-Baseline
+          path: compile-output
