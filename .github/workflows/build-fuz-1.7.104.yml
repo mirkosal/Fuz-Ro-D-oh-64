@@ -1,0 +1,65 @@
+name: Build Fuz Ro D'oh for Skyrim 1.7.104
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+    paths:
+      - '.github/workflows/build-fuz-1.7.104.yml'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      VCPKG_ROOT: C:\vcpkg-fuz
+    steps:
+      - name: Checkout 1.7.104 port branch
+        uses: actions/checkout@v4
+        with:
+          ref: skyrim-1.7.104-clib-port
+          fetch-depth: 0
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Package Vortex ZIP
+        if: success()
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Path build -Recurse -Filter 'FuzRoDoh.dll' | Select-Object -First 1
+          if (-not $dll) { $dll = Get-ChildItem -Path build -Recurse -Filter "Fuz Ro D'oh.dll" | Select-Object -First 1 }
+          if (-not $dll) { throw 'Fuz Ro D oh DLL not found' }
+          New-Item -ItemType Directory -Force -Path package\SKSE\Plugins | Out-Null
+          Copy-Item $dll.FullName "package\SKSE\Plugins\Fuz Ro D'oh.dll"
+          @"
+          Fuz Ro D'oh test build for Skyrim runtime 1.7.104.0
+          SKSE 2.3.1
+          Branch: skyrim-1.7.104-clib-port
+          Commit: $env:GITHUB_SHA
+          "@ | Set-Content package\BUILD_INFO.txt
+          Compress-Archive -Path package\* -DestinationPath "Fuz-Ro-D-oh-Skyrim-1.7.104-Test.zip" -Force
+
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fuz-Ro-D-oh-Skyrim-1.7.104-Test
+          path: Fuz-Ro-D-oh-Skyrim-1.7.104-Test.zip
