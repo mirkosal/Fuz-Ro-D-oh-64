@@ -1,132 +1,117 @@
-#include "FuzrodohInternals.h"
+#include "FuzRoDohInternals.h"
 
-IDebugLog				gLog;
+SubtitleHasher SubtitleHasher::Instance;
 
-namespace interfaces
+namespace
 {
-	PluginHandle				kPluginHandle = kPluginHandle_Invalid;
-	SKSEMessagingInterface*		kMsgInterface = nullptr;
+    FuzSettings g_settings;
+    constexpr auto kIniPath = "Data\\SKSE\\Plugins\\Fuz Ro D'oh.ini";
 }
 
-FuzRoDohINIManager		FuzRoDohINIManager::Instance;
-SubtitleHasher			SubtitleHasher::Instance;
-const double			SubtitleHasher::kPurgeInterval = 1000.0 * 60.0f;
+FuzSettings& GetFuzSettings()
+{
+    return g_settings;
+}
 
-SME::INI::INISetting	kWordsPerSecondSilence("WordsPerSecondSilence",
-											   "General",
-											   "Number of words a second of silent voice can \"hold\"",
-											   (SInt32)2);
+void FuzSettings::Load()
+{
+    CSimpleIniA ini;
+    ini.SetUnicode();
 
-SME::INI::INISetting	kSkipEmptyResponses("SkipEmptyResponses",
-											"General",
-											"Don't play back silent dialog for empty dialog responses",
-											(SInt32)1);
+    const auto loadResult = ini.LoadFile(kIniPath);
+    if (loadResult < 0) {
+        logger::info("INI not found; creating {} with defaults", kIniPath);
+        ini.SetLongValue("General", "WordsPerSecondSilence", wordsPerSecondSilence,
+            "Number of words a second of silent voice can hold");
+        ini.SetLongValue("General", "WideCharacterPerWord", wideCharactersPerWord,
+            "For CJK and other wide-character languages, how many characters are regarded as one word");
+        ini.SetBoolValue("General", "SkipEmptyResponses", skipEmptyResponses,
+            "Do not play silent dialogue for empty responses");
+
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::path(kIniPath).parent_path(), ec);
+        if (const auto saveResult = ini.SaveFile(kIniPath); saveResult < 0) {
+            logger::warn("Could not create {} (SimpleIni error {})", kIniPath, saveResult);
+        }
+        return;
+    }
+
+    wordsPerSecondSilence = static_cast<int>(ini.GetLongValue("General", "WordsPerSecondSilence", 2));
+    wideCharactersPerWord = static_cast<int>(ini.GetLongValue("General", "WideCharacterPerWord", 3));
+    skipEmptyResponses = ini.GetBoolValue("General", "SkipEmptyResponses", true);
+
+    if (wordsPerSecondSilence <= 0) {
+        wordsPerSecondSilence = 2;
+    }
+    if (wideCharactersPerWord <= 0) {
+        wideCharactersPerWord = 3;
+    }
+
+    logger::info("Settings: WordsPerSecondSilence={}, WideCharacterPerWord={}, SkipEmptyResponses={}",
+        wordsPerSecondSilence, wideCharactersPerWord, skipEmptyResponses);
+}
 
 std::string MakeSillyName()
 {
-	std::string Out("Fuz Ro ");
-	for (int i = 0; i < 64; i++)
-		Out += "D'oh";
-	return Out;
+    return "Fuz Ro D'oh";
 }
 
 bool CanShowDialogSubtitles()
 {
-	return GetINISetting("bDialogueSubtitles:Interface")->data.u8 != 0;
+    const auto* setting = RE::GetINISetting("bDialogueSubtitles:Interface");
+    return setting && setting->data.b;
 }
 
 bool CanShowGeneralSubtitles()
 {
-	return GetINISetting("bGeneralSubtitles:Interface")->data.u8 != 0;
+    const auto* setting = RE::GetINISetting("bGeneralSubtitles:Interface");
+    return setting && setting->data.b;
 }
 
-void FuzRoDohINIManager::Initialize(const char* INIPath, void* Paramenter)
+SubtitleHasher::HashT SubtitleHasher::CalculateHash(const char* a_string)
 {
-	this->INIFilePath = INIPath;
-	_MESSAGE("INI Path: %s", INIPath);
+    if (!a_string) {
+        return 0;
+    }
 
-	std::fstream INIStream(INIPath, std::fstream::in);
-	bool CreateINI = false;
-
-	if (INIStream.fail())
-	{
-		_MESSAGE("INI File not found; Creating one...");
-		CreateINI = true;
-	}
-
-	INIStream.close();
-	INIStream.clear();
-
-	RegisterSetting(&kWordsPerSecondSilence);
-	RegisterSetting(&kSkipEmptyResponses);
-
-	if (CreateINI)
-		Save();
+    HashT hash = 0;
+    for (const auto* p = reinterpret_cast<const unsigned char*>(a_string); *p; ++p) {
+        hash = ((hash << 5) + hash) + *p;  // djb2
+    }
+    return hash;
 }
 
-SubtitleHasher::HashT SubtitleHasher::CalculateHash(const char* String)
+void SubtitleHasher::Add(const char* a_subtitle)
 {
-	SME_ASSERT(String);
+    if (!a_subtitle || std::strlen(a_subtitle) <= 1) {
+        return;
+    }
 
-	// Uses the djb2 string hashing algorithm
-	// http://www.cse.yorku.ca/~oz/hash.html
-
-	HashT Hash = 0;
-	int i;
-
-	while (i = *String++)
-		Hash = ((Hash << 5) + Hash) + i; // Hash * 33 + i
-
-	return Hash;
+    std::scoped_lock lock(_lock);
+    _store.insert(CalculateHash(a_subtitle));
 }
 
-void SubtitleHasher::Add(const char* Subtitle)
+bool SubtitleHasher::HasMatch(const char* a_subtitle) const
 {
-	IScopedCriticalSection Guard(&Lock);
-	if (Subtitle && strlen(Subtitle) > 1 && HasMatch(Subtitle) == false)
-		Store.insert(CalculateHash(Subtitle));
+    if (!a_subtitle || !*a_subtitle) {
+        return false;
+    }
+
+    std::scoped_lock lock(_lock);
+    return _store.contains(CalculateHash(a_subtitle));
 }
 
-bool SubtitleHasher::HasMatch(const char* Subtitle)
+void SubtitleHasher::Tick()
 {
-	IScopedCriticalSection Guard(&Lock);
-	HashT Current = CalculateHash(Subtitle);
-	return Store.find(Current) != Store.end();
-}
+    const auto now = std::chrono::steady_clock::now();
+    if (now < _nextPurge) {
+        return;
+    }
 
-void SubtitleHasher::Purge(void)
-{
-	IScopedCriticalSection Guard(&Lock);
-	Store.clear();
-}
-
-void SubtitleHasher::Tick(void)
-{
-	IScopedCriticalSection Guard(&Lock);
-
-	TickCounter.Update();
-	TickReminder -= TickCounter.GetTimePassed();
-
-	if (TickReminder <= 0.0f)
-	{
-		TickReminder = kPurgeInterval;
-
-#ifndef NDEBUG
-		_MESSAGE("SubtitleHasher::Tick - Tock!");
-#endif
-		// we need to periodically purge the hash store as we can't differentiate b'ween topic responses with the same dialog text but different voice assets
-		// for instance, there may be two responses with the text "Hello there!" but only one with a valid voice file
-		Purge();
-	}
-}
-
-BSIStream* BSIStream::CreateInstance(const char* FilePath, void* ParentLocation)
-{
-	auto Instance = (BSIStream*)Heap_Allocate(0x20);		// standard bucket
-	return CALL_MEMBER_FN(Instance, Ctor)(FilePath, ParentLocation);
-}
-
-override::MenuTopicManager* override::MenuTopicManager::GetSingleton(void)
-{
-	return (override::MenuTopicManager*)::MenuTopicManager::GetSingleton();
+    std::scoped_lock lock(_lock);
+    if (now >= _nextPurge) {
+        _store.clear();
+        _nextPurge = now + std::chrono::minutes(1);
+        logger::debug("Subtitle hash cache purged");
+    }
 }
