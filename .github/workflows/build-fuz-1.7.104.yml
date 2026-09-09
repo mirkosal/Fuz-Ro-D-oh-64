@@ -7,7 +7,8 @@ on:
     paths:
       - '.github/workflows/build-fuz-1.7.104.yml'
 
-# Re-trigger after adding the Skyrim 1.7.104 CachedResponseData signature discriminator.
+# Diagnostic build: resolve the upstream 1.6.1170 functions through their
+# stable Address Library IDs on 1.7.104, then log the changed in-function sites.
 jobs:
   build:
     runs-on: windows-2022
@@ -21,9 +22,13 @@ jobs:
           ref: skyrim-1.7.104-clib-port
           fetch-depth: 0
 
-      - name: Apply Skyrim 1.7.104 CachedResponseData patch
+      - name: Apply Skyrim 1.7.104 CachedResponseData signature diagnostics
         shell: pwsh
         run: python ci/patch_cached_response_signature.py
+
+      - name: Apply Address Library ID hook-site diagnostic
+        shell: pwsh
+        run: python ci/patch_fuz_runtime_ids_diag.py
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -49,7 +54,7 @@ jobs:
         shell: pwsh
         run: cmake --build build --config Release --parallel
 
-      - name: Package full Vortex test mod
+      - name: Package full Vortex diagnostic mod
         if: success()
         shell: pwsh
         run: |
@@ -65,22 +70,28 @@ jobs:
           }
 
           @"
-          Fuz Ro D'oh TEST PORT for Skyrim runtime 1.7.104.0
+          Fuz Ro D'oh DIAGNOSTIC PORT for Skyrim runtime 1.7.104.0
           SKSE 2.3.1
           CommonLibSSE-NG 7.4.0
           Branch: skyrim-1.7.104-clib-port
           Source commit: $(git rev-parse HEAD)
 
-          This build validates the known upstream function signatures before writing hooks.
-          CachedResponseData duplicate signatures are accepted only when +0xEC is uniquely a 5-byte CALL site.
-          If validation fails, the plugin refuses to load and writes Fuz Ro D'oh.log.
+          Upstream 1.6.1170 function RVAs were reverse-mapped to Address Library IDs:
+            CachedResponseData ctor: 35249
+            UIUtils::QueueDialogSubtitles: 52854
+            ASCM::DisplayQueuedNPCChatterData: 52637
+            ASCM::QueueNPCChatterData: 52626
+
+          This diagnostic build intentionally refuses to install hooks after logging
+          the Address-Library-resolved 1.7.104 function bases and candidate hook sites.
+          It is only for producing a new Fuz Ro D'oh.log; do not continue gameplay with it.
           "@ | Set-Content package\BUILD_INFO.txt
 
-          Compress-Archive -Path package\* -DestinationPath "Fuz-Ro-D-oh-Skyrim-1.7.104-Full-Test.zip" -Force
+          Compress-Archive -Path package\* -DestinationPath "Fuz-Ro-D-oh-Skyrim-1.7.104-Diagnostic-v4.zip" -Force
 
-      - name: Upload Vortex ZIP
+      - name: Upload Vortex diagnostic ZIP
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Fuz-Ro-D-oh-Skyrim-1.7.104-Full-Test
-          path: Fuz-Ro-D-oh-Skyrim-1.7.104-Full-Test.zip
+          name: Fuz-Ro-D-oh-Skyrim-1.7.104-Diagnostic-v4
+          path: Fuz-Ro-D-oh-Skyrim-1.7.104-Diagnostic-v4.zip
